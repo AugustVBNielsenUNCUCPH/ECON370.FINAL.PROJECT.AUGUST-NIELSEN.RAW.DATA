@@ -1,0 +1,832 @@
+---
+title: "Final Project ECON 370"
+author: "August Valdemar Bering Nielsen "
+date: "University of North Carolina | [ECON 370](https://github.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA)" #"`r format(Sys.time(), '%d %B %Y')`"
+output: #html_document
+#  tufte::tufte_handout: default
+  tufte::tufte_html: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = F)
+library(tufte)
+```
+
+### Packages
+
+```{r}
+library(tidyverse)
+library(tidyquant)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(glmnet)
+library(ggplot2)
+```
+
+# Variable Reasoning
+
+For this project, I have a total of 17 variables from 4 different sources.
+
+The Business and Consumer Sentiment variables include the Business confidence indicator (BSCICP02USM460S), the Consumer sentiment confidence indicator (CSINFT02USM460S), the University of Michigan: Consumer Sentiment (UMCSENT) and the Economic policy uncertainty index (EMVOVERALLEMV). Business optimism rise when firms are expecting strong demand, higher sales and better economic conditions, which can altogether signal future growth, hiring and production. Along with Consumer sentiment, which provide insight into household expectations of future financial conditions, these sentiments might predict future economic growth and help us predict the S&P500. The economic policy uncertainty index measures uncertainty about macroeconomic conditions, which can affect volatility and expectations, both important factors in the S&P500 return. All of my Business and Consumer Sentiment variables are from [FRED](https://fred.stlouisfed.org/) – Federal Reserve Economic Data.
+
+The Labor Market indicators include the Unemployment rate (UNRATENSA) and the the Real-time Sahm Rule Recession Indicator (SAHMREALTIME), both retrieved from [FRED](https://fred.stlouisfed.org/) – Federal Reserve Economic Data. These variables serves as indicators of the labor market, specifically the unemployment rate can show recession risk or economic slowdown. The Sahm Rule Recession Indicator can signal recession, which highly affect earnings and growth of a firm. Both variables are important when looking at current recession risk factors in the economy, which can affect stock returns.
+
+Furthermore, I include Inflation (month-over-month change), the Federal Funds Effective Rate and the Prime Rate. The CPI data has been retrieved from [Bureau of Labor Statistics (BLS)](https://www.bls.gov/data/) – Employment, productivity, inflation, wages. The Federal Funds Effective Rate and the Prime Rate has been retrieved from [Fed](https://www.federalreserve.gov/data.htm) - data from Federal Reserve. Rising inflation, for the most part, leads to an increase in interest rates, which tightens financial conditions, this usually has a bad influence on stock valuations. The interest rates from FED again provides information about discount rates for future cash flows, and rising rates will negatively affect equity valuation, which impact stock pricing. All three variables can have predicting power when looking at future S&P500 returns.
+
+I include the the 10-Year Treasury Constant Maturity Minus 3-Month Treasury Constant Maturity (T10Y3MM) from [FRED](https://fred.stlouisfed.org/) – Federal Reserve Economic Data, and three important Fama-French factors, SMB, HML and Market Excess Return from [Open Source Asset Pricing Data](https://www.openassetpricing.com/data/) – Academic Finance Datasets. The yield curve from FRED is one of the strongest indicators of future recessions, because an inverted yield curve usually signals an upcoming recession (historically). This clearly affect stock returns. The Fama-French factors provides basic market conditions, which can be useful indicators.
+
+I include the Spot Crude Oil Price (WTISPLC) from [FRED](https://fred.stlouisfed.org/) – Federal Reserve Economic Data. Oil prices influence productions costs, consumer spending and inflation. The oil markets represent basic supply-demand conditions, and gives insight into geopolitical- and market conditions.
+
+A few activity indicators include the Monthly Supply of New Houses in the United States (MSACSR) and the Chicago Fed National Activity Index (CFNAI), both from [FRED](https://fred.stlouisfed.org/) – Federal Reserve Economic Data. These variables serve as broad measurements of economic activity, both important when predicting future economic conditions. Housing supply and demand can signal a slowing/growing economy and CFNAI can signal growth expectations.
+
+Food prices can capture inflation pressure and cost-of-living conditions, which influence consumer behavior. I include the Average Price: Eggs, Grade A, Large (Cost per Dozen) in U.S. City Average as a more nontraditional way of predicting future returns.
+
+------------------------------------------------------------------------
+
+# Data Extraction, Cleaning and Combining
+
+## The SP500 Data for Prediction (Not modified)
+
+```{r}
+# Data for prices, I would like to extract slightly before 1985
+# Get S&P500 daily data
+SP500_simple_returns = tq_get("^GSPC",
+                               from = "1984-01-01",
+                               to   = "2024-12-31",
+                               get  = "stock.prices") |>
+  tq_transmute(
+    select     = adjusted,       # adjusted price for accuracy
+    mutate_fun = periodReturn,   # calculate period returns
+    period     = "monthly",      # monthly returns
+    type       = "arithmetic",   # simple return (percentage change)
+    col_rename = "monthly_return"
+  ) |>
+  mutate(monthly_return = monthly_return*100) # Convert to percentage
+
+head(SP500_simple_returns)
+```
+
+## The Data
+
+I start my data cleaning by extracting all of my data from my GitHub repository - [GitHub Repository](https://github.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/tree/main){.uri}.
+
+```{r}
+# We use read.csv() to pull the Business confidence indicator data from my github repository. 
+BSCICP_data <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/BSCICP02USM460S.csv")
+
+# We use read.csv() to pull the Consumer sentiment confidence indicator data from my github repository.
+CSINFT_data <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/CSINFT02USM460S.csv")
+
+# We use read.csv() to pull the Economic policy uncertainty index data from my github repository. 
+EMVOVERALL_data <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/EMVOVERALLEMV.csv")
+
+# We use read.csv() to pull the Unemployment rate data from my github repository. 
+Unemployment_rate_data <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/UNRATENSA.csv")
+
+# We use read.csv() to pull the CPI data from my github repository. 
+CPI_mm_data <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/Consumer%20Price%20Index%20for%20All%20Urban%20Consumers%20(CPI-U)%20CUUR0000SA0")
+
+# We use read.csv() to pull the Chicago Fed National Activity Index data from my github repository. 
+CFNAI <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/CFNAI.csv")
+
+# We use read.table() to pull the Fama French Factors, SMB, HML and Market Excess Return txt data from my github repository. 
+FAMA_FRENCH <- read.table("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/F-F_Research_Data_Factors.txt", header = TRUE, sep = "", fill = TRUE)
+
+# We use read.csv() to pull the Federal funds effective rate and prime rate data from my github repository. 
+FFER_PR <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/Federal%20funds%20effective%20rate%20and%20prime%20rate.csv")
+
+# We use read.csv() to pull the Spot Crude Oil Price data from my github repository. 
+WTISPLC <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/WTISPLC.csv")
+
+# We use read.csv() to pull the Monthly Supply of New Houses in the United States data from my github repository.
+MSACSR <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/MSACSR.csv")
+
+# We use read.csv() to pull the Real-time Sahm Rule Recession Indicator data from my github repository. 
+SAHMREALTIME <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/SAHMREALTIME.csv")
+
+# We use read.csv() to pull the 10-Year Treasury Constant Maturity Minus 3-Month Treasury Constant Maturity data from my github repository. 
+T10Y3MM <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/T10Y3MM.csv")
+
+# We use read.csv() to pull the University of Michigan: Consumer Sentiment data from my github repository. 
+UMCSENT <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/UMCSENT.csv")
+
+# We use read.csv() to pull the Average Price: Eggs, Grade A, Large (Cost per Dozen) in U.S. City Average data from my github repository. 
+APU0000708111 <- read.csv("https://raw.githubusercontent.com/AugustVBNielsenUNCUCPH/ECON370.FINAL.PROJECT.AUGUST-NIELSEN.RAW.DATA/refs/heads/main/APU0000708111.csv")
+
+# See the first 6 observations of each of my chosen datasets.
+head(BSCICP_data)
+head(CSINFT_data)
+head(EMVOVERALL_data)
+head(Unemployment_rate_data)
+head(CPI_mm_data)
+head(CFNAI)
+head(FAMA_FRENCH)
+head(FFER_PR)
+head(WTISPLC)
+head(MSACSR)
+head(SAHMREALTIME)
+head(T10Y3MM)
+head(UMCSENT)
+head(APU0000708111)
+```
+
+# Mixed Frequency Date Modification
+
+I correct my datasets using the `lubridate` package and the `dplyr` package. I want to create a column in all sets called date, such that all my data can be joined together later on.
+
+```{r}
+# Correct the Business confidence indicator data. I create a column named date for the observation_date using ymd().
+BSCICP_data <- BSCICP_data |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, BSCICP02USM460S)
+
+# Correct the Consumer sentiment/confidence indicator data. I create a column named date for the observation_date using ymd().
+CSINFT_data <- CSINFT_data |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, CSINFT02USM460S)
+
+# Correct the Economic policy uncertainty index data. I create a column named date for the observation_date using ymd().
+EMVOVERALL_data <- EMVOVERALL_data |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, EMVOVERALLEMV)
+
+# Correct Unemployment rate data. Rename the column name for the unemployment rate and create the date column using ymd().
+Unemployment_rate_data <- Unemployment_rate_data |>
+  rename(Unemployment_rate = UNRATENSA) |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, Unemployment_rate)
+
+# Correct CPI data value name and create a column named date and change the date format to yyyy-mm-dd using make_date() from the lubridate package. 
+CPI_mm_data <- CPI_mm_data |>
+  rename(Inflation_percent_change = Value) |>
+  mutate(date = make_date(Year, as.integer(str_sub(Period, 2, 3)), 1)) |>
+  select(date, Inflation_percent_change)
+  
+# Correct the Chicago Fed National Activity Index data. Create a column named date for the observation_date using ymd().
+CFNAI <- CFNAI |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, CFNAI)
+
+# Correct the FAMA_FRENCH data such that the first column is not in row names format. Additionally we want a new column to be called date with the correct format such that it is yyyy-mm-dd using ymd() and paste0(). 
+FAMA_FRENCH <- FAMA_FRENCH |>
+  tibble::rownames_to_column("date") |>
+  mutate(date = ymd(paste0(date, "01")))
+
+# Correct the Federal funds effective rate and prime rate data such that we remove the first 5 rows. Additionally we want to rename the first column to date and correct the format to yyyy-mm-dd, right now it is yyyy-mm. We also rename the columns which hold the values for the Federal funds effective rate and prime rate.
+FFER_PR <- FFER_PR |>
+  tail(-5) |>
+  rename(FFE_rate = Federal.funds.effective.rate, 
+         Prime_rate = Average.majority.prime.rate.charged.by.banks...on.short.term.loans.to.business....quoted.on.an.investment.basis, 
+         date = Series.Description) |>
+  mutate(date = ymd(paste0(date, "01")))
+
+# Correct the Crude Oil Prices data. I create a column named date for the observation_date using ymd().
+WTISPLC <- WTISPLC |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, WTISPLC)
+
+# Correct the Monthly Supply of New Houses in the United States data. I create a column named date for the observation_date using ymd().
+MSACSR <- MSACSR |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, MSACSR)
+
+# Correct the Real-time Sahm Rule Recession Indicator data. I create a column named date for the observation_date using ymd().
+SAHMREALTIME <- SAHMREALTIME |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, SAHMREALTIME)
+
+# Correct the 10-Year Treasury Constant Maturity Minus 3-Month Treasury Constant Maturity data. I create a column named date for the observation_date using ymd().
+T10Y3MM <- T10Y3MM |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, T10Y3MM)
+
+# Correct the University of Michigan: Consumer Sentiment data. I create a column named date for the observation_date using ymd().
+UMCSENT <- UMCSENT |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, UMCSENT)
+
+# Correct the Average Price: Eggs, Grade A, Large (Cost per Dozen) in U.S. City Average data. I create a column named date for the observation_date using ymd().
+APU0000708111 <- APU0000708111 |>
+  mutate(date = ymd(observation_date)) |>
+  select(date, APU0000708111)
+
+# See the first 6 observations of each updated dataset.
+head(BSCICP_data)
+head(CSINFT_data)
+head(EMVOVERALL_data)
+head(Unemployment_rate_data)
+head(CPI_mm_data)
+head(CFNAI)
+head(FAMA_FRENCH)
+head(FFER_PR)
+head(WTISPLC)
+head(MSACSR)
+head(SAHMREALTIME)
+head(T10Y3MM)
+head(UMCSENT)
+head(APU0000708111)
+```
+
+## Date Alignment for Different Data and Joining
+
+The S&P500_simple_returns has the date to be month end, but all other data has the date to be month begin. Here, `floor_date(d, unit = "month")` from `lubridate` is used to make the date to be month begin.
+
+Now that all dates are at the beginning of the month, we are ready to join, using `left_join()` from the `dplyr` package we do the following.
+
+```{r}
+# Use left join to join all the data to SP500 returns
+Total_data = SP500_simple_returns |>
+  mutate(date = floor_date(date, unit = "month")) |>
+  left_join(BSCICP_data, by = "date") |>
+  left_join(CSINFT_data, by = "date") |>
+  left_join(EMVOVERALL_data, by = "date") |>
+  left_join(Unemployment_rate_data, by = "date") |>
+  left_join(CPI_mm_data, by = "date") |>
+  left_join(CFNAI, by = "date") |>
+  left_join(FAMA_FRENCH, by = "date") |>
+  left_join(FFER_PR, by = "date") |>
+  left_join(WTISPLC, by = "date") |>
+  left_join(MSACSR, by = "date") |>
+  left_join(SAHMREALTIME, by = "date") |>
+  left_join(T10Y3MM, by = "date") |>
+  left_join(UMCSENT, by = "date") |>
+  left_join(APU0000708111, by = "date")
+
+# We check how it looks
+head(Total_data)
+```
+
+## Creating a Lagged Return in addition to Current Return
+
+**"monthly_return"** is the current return. We also want a lagged return to predict future return. I will use the lag function to create "**lag_return**" variable.
+
+```{r}
+# Create the lagged return
+Total_data = Total_data |>
+  mutate(lag_return = lag(monthly_return))
+
+head(Total_data)
+```
+
+## Fill Missingness AFTER Joining
+
+EMVOVERALLEMV is missing past data, so we use `tidyr::replace_na(EMVOVERALLEMV, 0))` to fill in the NA's with zero.
+
+```{r}
+# Fill the EMVOVERALLEMV upward with 0.
+Total_data <- Total_data |>
+  mutate(EMVOVERALLEMV = tidyr::replace_na(EMVOVERALLEMV, 0))
+
+head(Total_data)
+```
+
+## Publication Lag
+
+All variables have publication lag. Since all variables have monthly frequency, we use lag each variable by one month using `mutate()` and `lag()`.
+
+```{r}
+# All variables have publication bias, so we must use mutate() and lag() to make appropriate lags. All values related to the variables are published ~1-20 days after the end of the month so we lag all monthly variables by one month.
+Total_data = Total_data |>
+  mutate(BSCICP02USM460S = lag(BSCICP02USM460S, 1)) |>
+  mutate(CSINFT02USM460S = lag(CSINFT02USM460S, 1)) |>
+  mutate(EMVOVERALLEMV = lag(EMVOVERALLEMV, 1)) |>
+  mutate(Unemployment_rate = lag(Unemployment_rate, 1)) |>
+  mutate(Inflation_percent_change = lag(Inflation_percent_change, 1)) |>
+  mutate(CFNAI = lag(CFNAI, 1)) |>
+  mutate(Mkt.RF = lag(Mkt.RF, 1)) |>
+  mutate(SMB = lag(SMB, 1)) |>
+  mutate(HML = lag(HML, 1)) |>
+  mutate(RF = lag(RF, 1)) |>
+  mutate(FFE_rate = lag(FFE_rate, 1)) |>
+  mutate(Prime_rate = lag(Prime_rate, 1)) |>
+  mutate(WTISPLC = lag(WTISPLC, 1)) |>
+  mutate(MSACSR = lag(MSACSR, 1)) |>
+  mutate(SAHMREALTIME = lag(SAHMREALTIME, 1)) |>
+  mutate(T10Y3MM = lag(T10Y3MM, 1)) |>
+  mutate(UMCSENT = lag(UMCSENT, 1)) |>
+  mutate(APU0000708111 = lag(APU0000708111, 1))
+
+head(Total_data)
+```
+
+Now, it is time to establish the variable to predict and corresponding predicting months. At 1984-01-01, we would try to predict returns on 1984-02-01, which means we need to create a column of predicting values using `lead`.
+
+## Create the Predictive Date and Return
+
+```{r}
+# Creating predicting_date and predicting_return using lead
+Total_data = Total_data |>
+  mutate(predicting_date = lead(date),
+         predicting_return = lead(monthly_return)) |>
+  # We do not need to keep date, put predicting_date and predicting_return to front
+  select(predicting_date, predicting_return, everything(), -date)
+
+head(Total_data)
+```
+
+We can confirm that our data is now **"predicting_date", "predicting_return", "monthly_return", "lag_return"** and all other 17 variables.
+
+# Filtering out the Desired Date Range and Check the begin and end (Should be exactly "1985-01-01" and "2024-12-01")
+
+Everything is lined up, and since we are creating a predicting model from 1985-01-01 to 2024-12-01, we are filtering out the desired date range for "predicting_date".
+
+```{r}
+# Subset predicting_date from 1985-01-01 to 2024-12-01
+Total_data = Total_data |>
+  filter(predicting_date >= "1985-01-01",
+         predicting_date <= "2024-12-01")
+
+# see the first and last 5 observations
+head(Total_data, n = 5)
+tail(Total_data, n = 5)
+```
+
+Based on the first and last five observations, we can confirm that we are predicting returns from 1985-01-01 to 2024-12-01. Additionally, we can see that *EMVOVERALLEMV* has two original NA's replaced with 0's for the predicting date 1985-01-01 and 1985-02-01. Because we do not want look-ahead bias, we do not fill in these NA's with future information! The missing information is very insignificant and will not have a meaningful impact on our estimation, but we fill them with 0 such that we won't have any future NA's.
+
+# Check whether any NA is left
+
+We check whether we have any missing data by `is.na`:
+
+```{r}
+# Check if there is any NA in the data
+anyNA(Total_data)
+
+```
+
+Excellent, we get FALSE, now we have no missingness!
+
+# Check the number of rows = 480
+
+We check if there are 40 years in total so 480 observations in total.
+
+```{r}
+# Check if there are 480 observations
+nrow(Total_data) == 480
+```
+
+Great! We get TRUE, so we proceed.
+
+------------------------------------------------------------------------
+
+# Exploration of raw data
+
+I will now explore the raw data. First, does the variables I chose have any sort of relationship with predicting_return? And if so, how significant is this relationship? Furthermore, I will discuss how these relationships change over time, and how they react to shocks in the market.
+
+I will use `cor` (correlation) to calculate the pairwise correlation between my variables.
+
+I will use an expanding window approach and plot how the relationships evolve over time.
+
+## Correlation
+
+We do not change the code here.
+
+```{r}
+# Convert everything except predicting_date to numeric so we do not get any errors when finding the correlation.
+Total_data <- Total_data |>
+  mutate(across(-predicting_date, ~ as.numeric(.)))
+
+
+# Correlation is computed across vectors, so we vectorize using a matrix here and present the result as a data frame converted from a tibble to display all 18 correlation values, as we want to interpret the values.
+cor_result <-
+  cor(Total_data$predicting_return, 
+      Total_data[,c("monthly_return", 
+                    "BSCICP02USM460S",
+                    "CSINFT02USM460S",
+                    "EMVOVERALLEMV",
+                    "Unemployment_rate", 
+                    "Inflation_percent_change",
+                    "CFNAI", 
+                    "Mkt.RF", 
+                    "SMB", 
+                    "HML", 
+                    "RF", 
+                    "FFE_rate", 
+                    "Prime_rate", 
+                    "WTISPLC",
+                    "MSACSR", 
+                    "SAHMREALTIME", 
+                    "T10Y3MM", 
+                    "UMCSENT", 
+                    "APU0000708111")])
+
+print(as_tibble(cor_result))
+```
+
+Previous months return, EMVOVERALLEMV, the Unemployment rate, Inflation percent change, CFNAI, the Risk free rate, the Federal funds effective rate, the Prime rate, SAHMREALTIME and UMCSENT are all positively correlated with return. The correlation is low with previous months return having the lowest positive correlation of 0.001383613 and EMVOVERALLEMV having the highest positive correlation of 0.06572877. These are low, but not zero or very close to zero. This is what we expect when predicting stock return, as they have very low correlation with other variables.
+
+We can say the exact same for the rest of the variables which have negative correlation with the return. They are low but not zero or very close to zero. Again, this is expected.
+
+## Expanding Window
+
+I use an Expanding Window approach with a minimum window length of 12 years = 144 months. Starting with the first 12 years of data, I expand the training window by one month at a time and recompute the correlations between the variables and the return. I implement this using a for-loop from month 144 to the end of the sample. I use ggplot to visualize the plot over time.
+
+```{r, fig.width=12, fig.height=8}
+# We preallocate the result, same shape as Total_data, no predicting_return.
+Rolling_corr = Total_data |>
+  select(-c("predicting_return"))
+
+# Variable_names (all names except "predicting_date", use logical indexing)
+Variable_names = names(Rolling_corr)[names(Rolling_corr) != "predicting_date"]
+
+# Make all the variables to NA as part of preallocate
+Rolling_corr[,Variable_names] = NA
+
+# A for loop to calculate the 12 year expanding correlations, vectorize inside loop.
+# 12-year expanding correlation is 144 months.
+# The first window in the expanded window would be 1st to 144th row, and last would be nrow(Total_data).
+for (i in 144:nrow(Total_data)) {
+  Rolling_corr[i, Variable_names] = 
+    cor(Total_data[1:i, "predicting_return"], 
+        Total_data[1:i, Variable_names])
+}
+
+# Note there are 143 rows of NA's due to the rolling window
+
+# We need to make the table to a long table and then use ggplot to plot the rolling correlation
+Rolling_corr |>
+  # Remove the missing rows
+  na.omit() |>
+  # Except predicting_date, make this a long table, 
+  pivot_longer(-predicting_date,
+               names_to = "Variable",
+               values_to = "rolling_corr") |>
+  ggplot(aes(x = predicting_date, y = rolling_corr, color = Variable)) +
+  geom_line(linewidth = 0.8) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  theme_minimal(base_size = 16) +
+  labs(
+    title = "Expanding Correlation with Predicting Return (12-yr Minimum Expanding Window)",
+    x = "Date",
+    y = "Expanding Correlation",
+    color = "Variable") +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(hjust = 0.5)) # Center the title
+```
+
+We observe that most variables show stable correlation signs as the window expands and their correlations gradually smooth out and converge. This is exactly what we want to see in an expanding window approach.
+
+As the historical data from our variables accumulates, the relationship between predictors and S&P 500 returns should stabilize. The majority of our predictors show a non-zero convergence as the correlations smooth out, which initially indicates that correlation values will be somewhat maintained long term.
+
+Between 2008 and 2020, correlation values increasingly converge and smooth out, which reflects a stable macroeconomic and financial environment.
+
+The plot clearly reveals a structural break around 2020 due to COVID-19. The pandemic created a significantly volatile macroeconomic environment. The result of this is volatility in our correlation values and we see less smoothing out and convergence.
+
+As the window expands through 2023 and forward, the correlation values begin to stabilize again. This suggests that the macroeconomic environment is gradually stabilizing following the shock in the economy.
+
+------------------------------------------------------------------------
+
+# LASSO Regression vs. Linear Regression
+
+I will finally estimate the linear model with the expanding window. I split the dataset into training, validation and testing.
+
+Since linear model does not have tuning parameters, we would just put the validation set into training set:
+
+-   1985-2008 as training, and 2009 to evaluate the model
+
+-   1985-2009 as training, and 2010 to evaluate the model
+
+    …
+
+-   1985-2023 as training, and 2024 to evaluate the model
+
+For the LASSO model, I have the division as:
+
+-   1985-2000 as training, 2001-2008 as validation, and 2009 to evaluate the model
+
+-   1985-2001 as training, 2002-2009 as validation, and 2010 to evaluate the model
+
+    …
+
+-   1985-2015 as training, 2016-2023 as validation, and 2024 to evaluate the model
+
+## Create possible tuning parameters
+
+```{r}
+# Define lambda grid
+# You should customize the grid to have the best lambda inside the range!
+lambda_grid = 10^seq(-3, 20, length.out = 50)  # 0.001 to 10^20
+
+# Initialize storage for CV errors
+cv_errors = rep(0, length(lambda_grid))
+```
+
+## Preallocate Fitted Results
+
+```{r}
+# Preallocate the fitted data from 2009 to 2024
+# Calling OLS OOS fit: fitted_return_OLS
+# Calling LASSO (or your model) OOS fit: fitted_return_Complex
+Testing_result = Total_data |>
+  filter(predicting_date >= "2009-01-01") |>
+  # Only keep the predicting_date, predicting_return, and create fitted_return
+  select(predicting_date, predicting_return) |>
+  rename(actual_return= predicting_return) |>
+  mutate(fitted_return_OLS = NA,
+         fitted_return_Complex = NA)
+```
+
+## Use a for loop to perform Fitting, CV and Testing
+
+We use alpha = 1.
+
+```{r}
+# Vector of all predictor variables used in LASSO
+predictor_vars <- c(
+  "monthly_return", 
+  "lag_return",
+  "BSCICP02USM460S",
+  "CSINFT02USM460S",
+  "EMVOVERALLEMV",
+  "Unemployment_rate",
+  "Inflation_percent_change",
+  "CFNAI",
+  "Mkt.RF",
+  "SMB",
+  "HML",
+  "RF",
+  "FFE_rate",
+  "Prime_rate",
+  "WTISPLC",
+  "MSACSR",
+  "SAHMREALTIME",
+  "T10Y3MM",
+  "UMCSENT",
+  "APU0000708111")
+
+# Use a for loop to estimate each model and glmnet for Ridge regression
+# Start from the end year 2009 to 2024 which are the testing periods
+# Note, i here is the testing data year
+for (i in 2009:2024) {
+  # Extract the Training data
+  Training_data = Total_data |>
+    # before i-8 year (i = 2009, training is before and not include 2001)
+    filter(year(predicting_date) < (i-8)) |>
+    # Only keep the predictors and the predicting_return
+    select(c(predicting_return, predictor_vars))
+
+  # Extract the validation data
+  Validation_data = Total_data |>
+    # between i-8 and i (not include i but include i-8)
+    filter(year(predicting_date) >= (i-8),
+           year(predicting_date) < i) |>
+    # Only keep the predictors and the predicting_return
+    select(c(predicting_return, predictor_vars))
+
+  # New data to predict
+  Testing_data = Total_data |>
+    # at i
+    filter(year(predicting_date) == i) |>
+    # Only keep the predictors
+    select(predictor_vars)
+  
+  # Note that we need to extract data as matrix for glmnet fitting
+  x_train = data.matrix(Training_data[, c(predictor_vars)])
+  y_train = Training_data$predicting_return
+  x_val  = data.matrix(Validation_data[, c(predictor_vars)])
+  y_val  = Validation_data$predicting_return
+  x_test = data.matrix(Testing_data[, c(predictor_vars)])
+  
+  # Use the for loop to find the best lambda
+  for(j in seq_along(lambda_grid)){
+    # Here is the part for complex model, Please change it if desired
+    model = glmnet(x_train, y_train, alpha = 1, lambda = lambda_grid[j])
+    
+    # Predict on the validation fold
+    y_pred = predict(model, newx = x_val)
+    
+    # Mean squared error
+    cv_errors[j] = mean((y_val - y_pred)^2)
+  }
+  
+  # Find the best lambda
+  best_lambda = lambda_grid[which.min(cv_errors)]
+  
+  # Refit the model with best_lambda
+  # For the total Train + Validation set!
+  model = glmnet(rbind(x_train, x_val), c(y_train, y_val), alpha = 1, lambda = best_lambda)
+
+  # Make predictions and save to year i using logical indexing
+  # Use predict to estimate the fitted data based on model and test data
+  Testing_result[year(Testing_result$predicting_date) == i, "fitted_return_Complex"] = predict(model, newx = x_test)
+  
+  # Run OLS Regression as benchmark
+  OLS = lm(predicting_return ~ .-predicting_date,
+           data = (Total_data |>
+                     # before ith year
+                     filter(year(predicting_date) < i)))
+  
+  # Make predictions and save to year i using logical indexing
+  # Use predict to estimate the fitted data based on model and test data
+  Testing_result[year(Testing_result$predicting_date) == i, "fitted_return_OLS"] = predict(
+    OLS,
+    newdata = (Total_data |>
+                 # at ith year
+                 filter(year(predicting_date) == i)))}
+
+# Message me if it is finished
+print("Done!")
+```
+
+## Save the Testing_result
+
+```{r}
+# Save the result
+saveRDS(Testing_result, "Testing_result.rds")
+```
+
+The data has been uploaded to GitHub to be accessed in my final presentation.
+
+# Analyzing the Result
+
+## Plotting the Residual vs. Actual Return (Required on slide)
+
+```{r, fig.width=12, fig.height=8}
+# Plot the result
+ggplot(Testing_result) +
+  geom_point(aes(actual_return, actual_return - fitted_return_OLS, color = "OLS")) +
+  # Change your method name here
+  geom_point(aes(actual_return, actual_return - fitted_return_Complex, color = "LASSO")) +
+  # Fitted regression line 
+  geom_smooth(aes(actual_return, actual_return - fitted_return_OLS, color = "OLS"),
+              method = "lm", se = TRUE) +
+  geom_smooth(aes(actual_return, actual_return - fitted_return_Complex, color = "LASSO"),
+              method = "lm", se = TRUE) +
+  labs(y = "Residual",
+      x = "Actual Return") + 
+  theme_minimal(base_size = 16)
+```
+
+As we can see, both are terrible. If the model was great, the residual vs. actual should be around 0 but here, we clearly do not see that. LASSO residual does not seem to be much better than OLS residual. This is somewhat expected, because most macro variables have almost no predictive power for next months S&P 500 return. Even with 17 variables + monthly_return and lag_return we have very low predictability and mostly just noise. We know that the historical average return beats almost every predictive model, and this is very clear if we look at our model.
+
+Mathematically, monthly stock returns behave very close to a random walk in a Markov chain, which makes it pretty much impossible for prediction variables to have any sort of predicting power.
+
+## OOS $R^2$ (Required on slide)
+
+```{r}
+# calculate OOS r squared
+# Create a function to estimate R_Sq_oos
+R_Sq_oos_func = function(actual_return, fitted_return) {
+  return(1 - sum((actual_return - fitted_return)^2)/sum((actual_return)^2))
+}
+
+# Print the OOS R^2 result
+print(
+  paste(
+    "The OOS R^2 for the OLS is: ",
+    R_Sq_oos_func(Testing_result$actual_return, Testing_result$fitted_return_OLS)
+  )
+)
+
+print(
+  paste(
+    "The OOS R^2 for the LASSO is: ",
+    R_Sq_oos_func(Testing_result$actual_return, Testing_result$fitted_return_Complex)
+  )
+)
+```
+
+We see that LASSO gives a positive OOS $R^2$ of \~0.043 and OLS gives a negative OOS $R^2$ of \~-0.287. This is again expected, since monthly return prediction is very rare and quite impossible as discussed earlier. In finance, an OOS $R^2$ value of \~0.043 when predicting next months stock returns is considered to be quite good, even though predictability is near zero. Overall, the results highlight an important point in economics, which is that predicting next months stock returns is extremely difficult, and even these complex machine learning models with many variables cannot outperform simple benchmarks.
+
+# Further Exploration
+
+We further explore which years are doing the worst and which years the model is fine.
+
+We calculate the OOS $R^2$ based on every 4 years.
+
+```{r}
+# Estimate every 4-year R_sq_oos
+R_sq_oos_table = Testing_result |>
+  # first break the dates into 4 year periods
+  mutate(
+    year = year(predicting_date),
+    period_4yr = cut(year, breaks = seq(min(year), max(year) + 3, by = 4), right = FALSE)
+  ) |>
+  group_by(period_4yr) |>
+  summarise(R_Sq_oos_OLS = R_Sq_oos_func(actual_return, fitted_return_OLS),
+            R_Sq_oos_LASSO = R_Sq_oos_func(actual_return, fitted_return_Complex))
+
+R_sq_oos_table
+```
+
+We see that the fit is good during 2013-2016. It is not good right after the crash in 2008 (financial crisis) and 2020 (COVID-19).
+
+The period from 2017 to 2020 contains the crash during the COVID-19 pandemic and that might very well be the cause of lower predictability compared to 2013-2016.
+
+We verify this by calculating the OOS $R^2$ for 2017-2019, before the COVID-19 pandemic.
+
+```{r}
+# Apply R_Sq_oos_func function for 2017 to 2019
+Testing_result |>
+  filter(year(predicting_date) >= 2017,
+         year(predicting_date) <= 2019) |>
+  summarise(R_Sq_oos_OLS = R_Sq_oos_func(actual_return, fitted_return_OLS),
+            R_Sq_oos_LASSO = R_Sq_oos_func(actual_return, fitted_return_Complex))
+```
+
+We see that the LASSO model is doing better during normal times, and \~0.08 is excellent if we compare it to our earlier results.
+
+This number is very close to the 2013-2016 period, which is even higher at \~0.092, an even better result!
+
+The OOS $R^2$ for 2021-2024 is not quite as good as the earlier values, lets look at the period 2022-2024.
+
+```{r}
+# Apply R_Sq_oos_func function for 2022 to 2024
+Testing_result |>
+  filter(year(predicting_date) >= 2022,
+         year(predicting_date) <= 2024) |>
+  summarise(R_Sq_oos_OLS = R_Sq_oos_func(actual_return, fitted_return_OLS),
+            R_Sq_oos_LASSO = R_Sq_oos_func(actual_return, fitted_return_Complex))
+```
+
+We get a negative OOS $R^2$ with the LASSO model for 2022-2024, which indicates bad predictability during this period. We would be better off not using the model for trading in this period, as this would be unprofitable. The benchmark would simply outperform the model during this period, suggesting that our LASSO model during these years (2022-2024) have no predictive power.
+
+As we will discover later, the negative OOS $R^2$ result associated with the period around \~2022-2024 will likely have a negative effect on our trading strategy, such that we won't beat the market. This is not universally true, but in our case (as we will see in a bit), our forecast becomes worse than the benchmark (buy and hold), so we should expect that our *buy-LASSO-positive* return is lower than our *buy-and-hold* return.
+
+This underperformance would happen around 2022-2024, as the years before 2022 shows a constant positive OOS $R^2$ value.
+
+## A Simple Trading Strategy Based on the Simple Model
+
+*The actual meaning of such predictive model is that we can implement trade on it! (You can think of this as a way to evaluate the predictive model. The more money we can make, the better the model is.)*
+
+*For example, let's have a strategy that: - We buy/hold the SP500 index if we predict positive returns next month. - We sell/not buy the SP500 index if we predict negative/zero returns next month.*
+
+*We will stick to the simplest one.*
+
+To see whether our combination of predictive model and trading strategy is effective, we will compare:
+
+-   linear model + simple strategy's cumulative return (buyLMpositive)
+
+-   LASSO + simple strategy's cumulative return (buyLASSOpositive)
+
+-   buy and hold cumulative return (buyANDhold)
+
+As mentioned earlier, our LASSO model gives a constant positive number before \~2022, so buyLASSOpositive would be exactly the same as buyANDhold.
+
+```{r, fig.width=12, fig.height=8}
+# Create a dataset for trading strategy comparison: buyLMpositive, buyLASSOpositive vs. buyANDhold
+Trading_Strategy = Testing_result |>
+  # Create a logical index of whether we realize the monthly return based on our trading strategy
+  mutate(Trade_OLS = (fitted_return_OLS > 0),
+         Trade_Complex = (fitted_return_Complex > 0)) |>
+  # Create a buyLMpositive strategy 
+  mutate(buyLMpositive_ret = Trade_OLS*actual_return,
+         buyLASSOpositive_ret = Trade_Complex*actual_return)
+
+
+# Now, use for loop to calculate the cumulative gross returns
+# Preset the two strategy
+Trading_Strategy$buyLMpositive = NA
+Trading_Strategy$buyLMpositive[1] = 1
+Trading_Strategy$buyLASSOpositive = NA
+Trading_Strategy$buyLASSOpositive[1] = 1
+Trading_Strategy$buyANDhold = Trading_Strategy$buyLMpositive
+
+# Loop
+for(i in 2:nrow(Trading_Strategy)) {
+  Trading_Strategy$buyLMpositive[i] = Trading_Strategy$buyLMpositive[i-1] * (1+Trading_Strategy$buyLMpositive_ret[i]/100)
+  Trading_Strategy$buyLASSOpositive[i] = Trading_Strategy$buyLASSOpositive[i-1] * (1+Trading_Strategy$buyLASSOpositive_ret[i]/100)
+  Trading_Strategy$buyANDhold[i] = Trading_Strategy$buyANDhold[i-1] * (1+Trading_Strategy$actual_return[i]/100)
+}
+
+# Plot the cumulative returns
+# Only select buyLMpositive, buyLASSOpositive and buyANDhold; and make the data longer
+Trading_Strategy |>
+  pivot_longer(c(buyLMpositive, buyLASSOpositive, buyANDhold), names_to = "Strategy", values_to = "CR") |>
+  ggplot(aes(predicting_date, CR, color = Strategy)) +
+  geom_line(linewidth = 1.5) +
+  theme_minimal() +
+  scale_color_manual(values = c(
+  buyLMpositive    = "#009966",
+  buyLASSOpositive = "#6666FF",
+  buyANDhold       = "#CC0099")) +
+  theme_minimal(base_size = 16) +
+  labs(
+    title = "Cumulative Returns with Different Trading Strategies",
+    x = "Date",
+    y = "Cumulative Returns") +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(hjust = 0.5)) # Center the title
+```
+
+We can clearly see that the simple trading strategy + the LM predictive model is performing much worse than simply buy-and-hold the S&P500 index.
+
+If we look at our LASSO trading strategy, we see that it is actually the same line as buyANDhold up until \~2023 and blocking the pink curve. As mentioned earlier, we would expect that our *buy-LASSO-positive* return is lower than our *buy-and-hold* return around \~2022-2024, and this happens in 2023!
+
+The negative OOS $R^2$ result associated with the period \~2022-2024 can explain this. Since our model has worse predictability than simply buying and holding the S&P500 in this period, the benchmark outperforms the LASSO model, as we can see by the pink line.
+
+Based on the simple trading strategy, LASSO does not yield better results than Buy and Hold, consequently, it yields a slightly lower return. In conclusion, predicting stock returns is extremely challenging, which is why economists have long argued that consistently outperforming the market is impossible.
+
+***“Don't look for the needle in the haystack. Just buy the haystack!”*** - John C. Bogle, The Little Book of Common Sense Investing: The Only Way to Guarantee Your Fair Share of Stock Market Returns
+
+## Save the Trading_Strategy
+
+```{r}
+# Save the result
+saveRDS(Trading_Strategy, "Trading_Strategy.rds")
+```
+
+The Trading Strategy has been uploaded to GitHub to be accessed in my final presentation.
